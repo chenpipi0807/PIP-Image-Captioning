@@ -1,0 +1,27 @@
+
+创建并激活 venv
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+装基础工具与 pillow/flask/requests
+python -m pip install -r requirements.txt
+
+验证 GPU 可用
+python -c "import torch; print(torch.__version__, torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
+应输出 True 和你的 4090 名称。
+
+运行应用
+python app.py
+
+后续运行
+.\.venv\Scripts\Activate.ps1
+python app.py
+
+重要提示
+模型目录 c:\GPT4O打标工具\Qwen2.5-VL-7B-Instruct-AWQ\ 必须是 HuggingFace 可加载结构（含 config.json、model.safetensors、tokenizer.*、preprocessor_config.json 等）。如果是 GGUF 文件则不兼容当前实现。
+我已在 app.py 中实现 LocalQwenVLTool 并强制检查 GPU；只要上面步骤成功，加载应当正常。
+请始终在 venv 激活状态下安装/运行，避免回到 base 或 Roaming 用户站点路径。
+如果仍想用 requirements.txt
+你可以在 venv 内执行：
+pip install -r requirements.txt --no-deps
+
+
