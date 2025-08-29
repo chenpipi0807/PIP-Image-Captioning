@@ -4,6 +4,12 @@
 
 感谢毛老师为本项目提供的PE支持。
 
+
+<img width="1931" height="1889" alt="image" src="https://github.com/user-attachments/assets/3d4336f3-fa21-4134-987a-9d156c6c4b34" />
+<img width="1932" height="1824" alt="image" src="https://github.com/user-attachments/assets/bc7d9b87-3223-4b58-a435-9d4eadd67f4e" />
+
+
+
 ## 功能特性
 
 ### 🖼️ 图像预处理
@@ -72,7 +78,7 @@ cd PIP-Image-Captioning
 pip install -r requirements.txt
 ```
 
-### 4. 启动应用
+### 4. 启动应用（更推荐使用venv）
 ```bash
 python app.py
 ```
