@@ -14,6 +14,8 @@ import base64
 import torch
 from transformers import AutoTokenizer, AutoProcessor, AutoModelForImageTextToText
 from datetime import datetime
+from qwen_vl_utils import process_vision_info
+import cv2
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -123,6 +125,12 @@ class LocalQwenVLTool:
             self.model = None
             self.tokenizer = None
             self.processor = None
+
+    def is_loaded(self):
+        """检查模型是否已成功加载"""
+        return (self.model is not None and 
+                self.tokenizer is not None and 
+                self.processor is not None)
 
     def _build_inputs(self, image_path, prompt_text):
         image = Image.open(image_path).convert("RGB")
@@ -275,6 +283,147 @@ class LocalQwenVLTool:
         except Exception as e:
             logger.error(f"annotate_image_custom 出错: {e}")
             return None
+
+    def get_video_info(self, video_path):
+        """获取视频基本信息"""
+        try:
+            cap = cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                raise ValueError(f"无法打开视频文件: {video_path}")
+            
+            # 获取视频属性
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            duration = frame_count / fps if fps > 0 else 0
+            
+            cap.release()
+            
+            return {
+                'fps': fps,
+                'duration': duration,
+                'width': width,
+                'height': height,
+                'frame_count': frame_count,
+                'resolution': f"{width}*{height}"
+            }
+        except Exception as e:
+            logger.error(f"获取视频信息失败: {e}")
+            return None
+
+    def _build_video_inputs(self, video_path, prompt_text, fps=None, max_pixels=None):
+        """构建视频输入"""
+        try:
+            # 自动获取视频信息
+            video_info = self.get_video_info(video_path)
+            if video_info:
+                # 使用视频原始帧率，但限制在合理范围内
+                if fps is None:
+                    fps = min(max(video_info['fps'], 0.5), 2.0)
+                
+                # 自动调整分辨率
+                if max_pixels is None:
+                    original_pixels = video_info['width'] * video_info['height']
+                    if original_pixels > 1280*720:
+                        max_pixels = 1280*720  # 降低分辨率以节省显存
+                    else:
+                        max_pixels = original_pixels
+                
+                logger.info(f"视频信息: {video_info['width']}x{video_info['height']}, {video_info['fps']:.1f}fps, {video_info['duration']:.1f}s")
+                logger.info(f"处理参数: fps={fps:.1f}, max_pixels={max_pixels}")
+            
+            # 确保使用绝对路径
+            abs_video_path = os.path.abspath(video_path)
+            
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "video",
+                            "video": abs_video_path,  # 直接使用绝对路径，不加file://前缀
+                        },
+                        {"type": "text", "text": prompt_text},
+                    ],
+                }
+            ]
+            
+            # 应用聊天模板
+            text = self.processor.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+            
+            # 处理视觉信息（简化API调用）
+            image_inputs, video_inputs = process_vision_info(messages)
+            
+            # 使用processor处理输入
+            inputs = self.processor(
+                text=[text],
+                images=image_inputs,
+                videos=video_inputs,
+                fps=fps,
+                max_pixels=max_pixels,
+                padding=True,
+                return_tensors="pt",
+            )
+            
+            return inputs
+        except Exception as e:
+            logger.error(f"视频输入构建失败: {e}")
+            raise
+
+    def process_video(self, video_path, language='zh', fps=None, max_pixels=None, max_tokens=1024):
+        """处理视频并生成分析结果（自动检测视频属性）"""
+        try:
+            start_time = time.time()
+            
+            # 获取视频分析提示词
+            video_prompt = (
+                self.prompts.get('modes', {}).get('video', {}).get(language, {}).get('system')
+                or self.prompts.get('modes', {}).get('video', {}).get('zh', {}).get('system')
+                or "请详细分析这个视频的内容，包括主要场景、人物动作、时间变化和关键事件。"
+            )
+            
+            inputs = self._build_video_inputs(video_path, video_prompt, fps, max_pixels)
+            
+            # 确保所有输入都正确移动到GPU
+            inputs = {k: v.to(self.model.device, non_blocking=True) for k, v in inputs.items()}
+            
+            prep_time = time.time() - start_time
+            logger.info(f"视频输入预处理耗时: {prep_time:.2f}s")
+            
+            gen_start = time.time()
+            with torch.inference_mode():
+                # 清理显存
+                torch.cuda.empty_cache()
+                
+                # 生成视频分析
+                output_ids = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_tokens,
+                    temperature=0.7,
+                    top_p=0.9,
+                    do_sample=True,
+                    use_cache=True,
+                    pad_token_id=self.tokenizer.eos_token_id
+                )
+            
+            gen_time = time.time() - gen_start
+            logger.info(f"视频分析生成耗时: {gen_time:.2f}s")
+            
+            # 截取新生成部分
+            new_tokens = output_ids[:, inputs["input_ids"].shape[1]:]
+            text = self.tokenizer.batch_decode(new_tokens, skip_special_tokens=True)[0]
+            
+            total_time = time.time() - start_time
+            logger.info(f"视频处理总耗时: {total_time:.2f}s")
+            
+            return text.strip(), total_time
+        except Exception as e:
+            logger.error(f"视频处理失败: {e}")
+            torch.cuda.empty_cache()
+            return f"错误：视频处理失败 - {str(e)}", 0
 
 # 全局变量用于存储处理状态
 processing_status = {}
@@ -721,6 +870,163 @@ def delete_custom_template(template_id):
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'error': str(e)})
+
+@app.route('/api/process_video', methods=['POST'])
+def process_video():
+    try:
+        # 检查是否有上传的视频文件
+        if 'video' not in request.files:
+            return jsonify({'success': False, 'error': '未找到视频文件'})
+        
+        video_file = request.files['video']
+        if video_file.filename == '':
+            return jsonify({'success': False, 'error': '未选择视频文件'})
+        
+        # 获取参数（简化为仅语言选择）
+        language = request.form.get('language', 'zh')
+        
+        # 保存上传的视频文件
+        temp_dir = Path('temp')
+        temp_dir.mkdir(exist_ok=True)
+        
+        # 生成唯一文件名
+        file_extension = Path(video_file.filename).suffix.lower()
+        if file_extension not in ['.mp4', '.avi', '.mov', '.mkv', '.webm']:
+            return jsonify({'success': False, 'error': f'不支持的视频格式: {file_extension}'})
+        
+        temp_filename = f"{uuid.uuid4()}{file_extension}"
+        temp_video_path = temp_dir / temp_filename
+        
+        # 保存文件
+        video_file.save(temp_video_path)
+        logger.info(f"视频文件已保存到: {temp_video_path}")
+        
+        try:
+            # 获取模型实例并处理视频
+            tool = get_model_instance()
+            
+            # 确保模型已加载
+            if not tool.is_loaded():
+                tool.load_model()
+            
+            # 处理视频（自动检测参数）
+            annotation, processing_time = tool.process_video(
+                str(temp_video_path), 
+                language=language
+            )
+            
+            return jsonify({
+                'success': True,
+                'annotation': annotation,
+                'processing_time': f"{processing_time:.2f}秒"
+            })
+            
+        finally:
+            # 清理临时文件
+            try:
+                if temp_video_path.exists():
+                    temp_video_path.unlink()
+                    logger.info(f"临时视频文件已删除: {temp_video_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"清理临时文件失败: {cleanup_error}")
+                
+    except Exception as e:
+        logger.error(f"视频处理API错误: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/process_videos', methods=['POST'])
+def process_videos():
+    try:
+        data = request.get_json()
+        folder_path = data.get('folder_path')
+        language = data.get('language', 'zh')
+        
+        if not folder_path or not os.path.exists(folder_path):
+            return jsonify({'error': '文件夹路径无效'})
+        
+        # 生成任务ID
+        task_id = str(uuid.uuid4())
+        processing_status[task_id] = {
+            'status': 'starting',
+            'progress': 0,
+            'message': '正在扫描视频文件...',
+            'messages': []
+        }
+        
+        # 在后台线程中处理视频
+        thread = threading.Thread(target=batch_process_videos, args=(task_id, folder_path, language))
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({'task_id': task_id})
+    except Exception as e:
+        logger.error(f"批量视频处理启动失败: {e}")
+        return jsonify({'error': str(e)})
+
+def batch_process_videos(task_id, folder_path, language):
+    try:
+        # 获取模型实例
+        tool = get_model_instance()
+        if not tool.is_loaded():
+            tool.load_model()
+        
+        # 扫描视频文件
+        video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv']
+        video_files = []
+        
+        for root, dirs, files in os.walk(folder_path):
+            for file in files:
+                if any(file.lower().endswith(ext) for ext in video_extensions):
+                    video_files.append(os.path.join(root, file))
+        
+        if not video_files:
+            processing_status[task_id] = {
+                'status': 'error',
+                'message': '未找到支持的视频文件'
+            }
+            return
+        
+        processing_status[task_id]['message'] = f'找到 {len(video_files)} 个视频文件，开始处理...'
+        processing_status[task_id]['messages'].append(f'找到 {len(video_files)} 个视频文件')
+        
+        # 处理每个视频文件
+        for i, video_file in enumerate(video_files):
+            try:
+                processing_status[task_id]['progress'] = int((i / len(video_files)) * 100)
+                processing_status[task_id]['message'] = f'正在处理: {os.path.basename(video_file)}'
+                processing_status[task_id]['messages'].append(f'处理视频: {os.path.basename(video_file)}')
+                
+                # 处理视频
+                annotation, processing_time = tool.process_video(video_file, language=language)
+                
+                # 保存结果到视频文件同目录
+                video_dir = os.path.dirname(video_file)
+                video_name = os.path.splitext(os.path.basename(video_file))[0]
+                output_file = os.path.join(video_dir, f'{video_name}_annotation.txt')
+                
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    f.write(annotation)
+                
+                processing_status[task_id]['messages'].append(f'完成: {os.path.basename(video_file)} ({processing_time:.1f}s)')
+                
+            except Exception as e:
+                error_msg = f'处理 {os.path.basename(video_file)} 失败: {str(e)}'
+                processing_status[task_id]['messages'].append(error_msg)
+                logger.error(error_msg)
+        
+        # 完成处理
+        processing_status[task_id] = {
+            'status': 'completed',
+            'progress': 100,
+            'message': f'批量视频标注完成！处理了 {len(video_files)} 个视频文件，结果保存在各视频文件旁边'
+        }
+        
+    except Exception as e:
+        logger.error(f"批量视频处理失败: {e}")
+        processing_status[task_id] = {
+            'status': 'error',
+            'message': f'批量处理失败: {str(e)}'
+        }
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5005)

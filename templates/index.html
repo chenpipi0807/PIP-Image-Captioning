@@ -146,6 +146,20 @@
             transition: all 0.3s ease;
         }
 
+        /* 专门为分析结果textarea设置深色背景 */
+        #videoResult, #singleResult, #batchResult {
+            background: #252525 !important;
+            color: #ffffff !important;
+            border: 2px solid var(--border-color) !important;
+        }
+
+        #videoResult:focus, #singleResult:focus, #batchResult:focus {
+            background: #252525 !important;
+            color: #ffffff !important;
+            border-color: var(--neon-green) !important;
+            box-shadow: 0 0 15px rgba(57, 255, 20, 0.2) !important;
+        }
+
         .form-control:focus, .form-select:focus {
             background: var(--hover-bg);
             border-color: var(--neon-green);
@@ -312,6 +326,11 @@
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="video-annotation-tab" data-bs-toggle="pill" data-bs-target="#video-annotation" type="button" role="tab">
+                        <i class="fas fa-video me-2"></i>视频分析
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
                     <button class="nav-link" id="custom-templates-tab" data-bs-toggle="pill" data-bs-target="#custom-templates" type="button" role="tab">
                         <i class="fas fa-edit me-2"></i>自定义模板
                     </button>
@@ -364,6 +383,14 @@
                                         </select>
                                     </div>
 
+                                    <div class="row mb-3">
+                                        <div class="col-12">
+                                            <div class="alert alert-info">
+                                                <i class="fas fa-info-circle me-2"></i>
+                                                <strong>智能处理：</strong>系统将自动检测视频属性（帧率、分辨率）并优化处理参数
+                                            </div>
+                                        </div>
+                                    </div>
 
                                     <button class="btn btn-primary btn-lg w-100" onclick="startSingleAnnotation()" id="singleAnnotateBtn" disabled>
                                         <i class="fas fa-magic me-2"></i>开始标注
@@ -475,14 +502,24 @@
                             <div class="text-center mb-4">
                                 <i class="fas fa-robot feature-icon"></i>
                                 <h3 class="section-title">批量AI标注</h3>
-                                <p class="text-muted">使用GPT-4o模型进行批量智能图像分析和标注</p>
+                                <p class="text-muted">使用Qwen2.5-VL模型进行批量智能图像和视频分析标注</p>
                             </div>
 
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="option-group">
                                         <label class="form-label fw-bold">
-                                            <i class="fas fa-folder me-2"></i>图片文件夹路径
+                                            <i class="fas fa-file-alt me-2"></i>处理类型
+                                        </label>
+                                        <select class="form-select" id="batchProcessType" onchange="toggleBatchInputs()">
+                                            <option value="images">批量图片标注</option>
+                                            <option value="videos">批量视频标注</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="option-group">
+                                        <label class="form-label fw-bold">
+                                            <i class="fas fa-folder me-2"></i><span id="folderLabel">图片文件夹路径</span>
                                         </label>
                                         <input type="text" class="form-control" id="annotationFolderPath" placeholder="请输入图片文件夹路径">
                                     </div>
@@ -493,8 +530,9 @@
                                         </label>
                                         <select class="form-select" id="annotationType" onchange="toggleAnalysisTypes()">
                                             <option value="natural">自然语言推理</option>
-                                            <option value="tags">标签推理</option>
-                                            <option value="mixed">混合标签</option>
+                                            <option value="tags" id="tagsOption">标签推理</option>
+                                            <option value="mixed" id="mixedOption">混合标签</option>
+                                            <option value="video" id="videoOption" style="display:none;">视频分析</option>
                                         </select>
                                     </div>
 
@@ -532,9 +570,99 @@
                     </div>
                 </div>
 
+                <!-- 视频分析 -->
+                <div class="tab-pane fade" id="video-annotation" role="tabpanel">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="text-center mb-4">
+                                <i class="fas fa-video feature-icon"></i>
+                                <h3 class="section-title">视频智能分析</h3>
+                                <p class="text-muted">上传视频文件进行AI智能分析和描述</p>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="option-group">
+                                        <label class="form-label">
+                                            <i class="fas fa-upload me-2"></i>选择视频文件
+                                        </label>
+                                        <input type="file" class="form-control" id="videoFile" accept="video/*" onchange="previewVideo()">
+                                        <small class="text-muted">支持 MP4, AVI, MOV, MKV 等格式</small>
+                                    </div>
+
+                                    <div class="option-group">
+                                        <label class="form-label">
+                                            <i class="fas fa-language me-2"></i>输出语言
+                                        </label>
+                                        <select class="form-select" id="videoLanguage">
+                                            <option value="zh">中文</option>
+                                            <option value="en">English</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="option-group">
+                                        <div class="alert alert-info">
+                                            <i class="fas fa-magic me-2"></i>
+                                            <strong>智能处理：</strong>系统将自动检测视频属性（帧率、分辨率、时长）并优化处理参数
+                                        </div>
+                                    </div>
+
+                                    <button class="btn btn-primary w-100" onclick="processVideo()" id="processVideoBtn">
+                                        <i class="fas fa-play me-2"></i>开始视频分析
+                                    </button>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <div class="option-group">
+                                        <h5><i class="fas fa-eye me-2"></i>视频预览</h5>
+                                        <div class="preview-container" id="videoPreviewContainer">
+                                            <video id="videoPreview" controls style="width: 100%; max-height: 300px; border-radius: 12px; display: none;">
+                                                您的浏览器不支持视频播放。
+                                            </video>
+                                            <div class="text-muted text-center p-4" id="videoPlaceholder">
+                                                <i class="fas fa-video fa-3x mb-3"></i>
+                                                <p>选择视频文件后将在此显示预览</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="status-box" id="videoStatus">
+                                        <p class="text-muted text-center">
+                                            <i class="fas fa-info-circle me-2"></i>等待上传视频文件
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row mt-4">
+                                <div class="col-12">
+                                    <div class="option-group">
+                                        <h5><i class="fas fa-file-text me-2"></i>分析结果</h5>
+                                        <textarea class="form-control" id="videoResult" rows="12" readonly placeholder="视频分析结果将在此显示..."></textarea>
+                                        <div class="mt-3">
+                                            <button class="btn btn-outline-primary" onclick="copyVideoResult()">
+                                                <i class="fas fa-copy me-2"></i>复制结果
+                                            </button>
+                                            <button class="btn btn-outline-secondary" onclick="clearVideoResult()">
+                                                <i class="fas fa-eraser me-2"></i>清空结果
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 自定义模板 -->
                 <div class="tab-pane fade" id="custom-templates" role="tabpanel">
                     <div class="card">
+                        <div class="nav-tabs">
+                            <button class="nav-tab active" onclick="showTab('single')">单张图片</button>
+                            <button class="nav-tab" onclick="showTab('batch')">批量处理</button>
+                            <button class="nav-tab" onclick="showTab('video')">视频分析</button>
+                            <button class="nav-tab" onclick="showTab('custom')">自定义模板</button>
+                        </div>
                         <div class="card-body">
                             <div class="text-center mb-4">
                                 <i class="fas fa-edit feature-icon"></i>
@@ -889,6 +1017,7 @@
             const folderPath = document.getElementById('annotationFolderPath').value;
             const annotationType = document.getElementById('annotationType').value;
             const language = document.getElementById('annotationLanguage').value;
+            const processType = document.getElementById('batchProcessType').value;
             
             let selectedTypes = [];
 
@@ -901,11 +1030,15 @@
                 folder_path: folderPath,
                 annotation_type: annotationType,
                 selected_types: selectedTypes,
-                language: language
+                language: language,
+                process_type: processType
             };
 
             try {
-                const response = await fetch('/api/process_images', {
+                // 根据处理类型选择不同的API端点
+                const apiEndpoint = processType === 'videos' ? '/api/process_videos' : '/api/process_images';
+                
+                const response = await fetch(apiEndpoint, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -917,7 +1050,8 @@
                 currentTaskId = result.task_id;
 
                 document.getElementById('annotationProgress').classList.remove('d-none');
-                document.getElementById('annotationStatus').innerHTML = '<p><i class="fas fa-spinner fa-spin me-2"></i>开始标注...</p>';
+                const statusText = processType === 'videos' ? '开始视频批量分析...' : '开始标注...';
+                document.getElementById('annotationStatus').innerHTML = `<p><i class="fas fa-spinner fa-spin me-2"></i>${statusText}</p>`;
 
                 // 开始轮询状态
                 pollStatus(currentTaskId, 'annotation');
@@ -1277,6 +1411,138 @@
             // 恢复按钮文本
             const saveBtn = document.querySelector('button[onclick="saveTemplate()"]');
             saveBtn.innerHTML = '<i class="fas fa-save me-2"></i>保存模板';
+        }
+
+        // 视频预览功能
+        function previewVideo() {
+            const fileInput = document.getElementById('videoFile');
+            const videoPreview = document.getElementById('videoPreview');
+            const videoPlaceholder = document.getElementById('videoPlaceholder');
+            
+            if (fileInput.files && fileInput.files[0]) {
+                const file = fileInput.files[0];
+                const url = URL.createObjectURL(file);
+                
+                videoPreview.src = url;
+                videoPreview.style.display = 'block';
+                videoPlaceholder.style.display = 'none';
+                
+                // 更新状态
+                document.getElementById('videoStatus').innerHTML = `
+                    <p class="text-success">
+                        <i class="fas fa-check-circle me-2"></i>视频已加载: ${file.name}
+                    </p>
+                    <p class="text-muted small">文件大小: ${(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                `;
+            }
+        }
+
+        // 处理视频
+        async function processVideo() {
+            const fileInput = document.getElementById('videoFile');
+            const language = document.getElementById('videoLanguage').value;
+            const processBtn = document.getElementById('processVideoBtn');
+            const statusDiv = document.getElementById('videoStatus');
+            const resultTextarea = document.getElementById('videoResult');
+            
+            if (!fileInput.files || !fileInput.files[0]) {
+                alert('请先选择视频文件');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('video', fileInput.files[0]);
+            formData.append('language', language);
+            
+            // 更新UI状态
+            processBtn.disabled = true;
+            processBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>分析中...';
+            statusDiv.innerHTML = '<p class="text-info"><i class="fas fa-cog fa-spin me-2"></i>正在分析视频，请稍候...</p>';
+            resultTextarea.value = '';
+            
+            try {
+                const response = await fetch('/api/process_video', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    resultTextarea.value = result.annotation;
+                    statusDiv.innerHTML = `
+                        <p class="text-success">
+                            <i class="fas fa-check-circle me-2"></i>视频分析完成
+                        </p>
+                        <p class="text-muted small">处理时间: ${result.processing_time || '未知'}</p>
+                    `;
+                } else {
+                    statusDiv.innerHTML = `<p class="text-danger"><i class="fas fa-exclamation-circle me-2"></i>错误: ${result.error}</p>`;
+                }
+            } catch (error) {
+                console.error('视频处理失败:', error);
+                statusDiv.innerHTML = '<p class="text-danger"><i class="fas fa-exclamation-circle me-2"></i>视频处理失败，请检查网络连接</p>';
+            } finally {
+                processBtn.disabled = false;
+                processBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始视频分析';
+            }
+        }
+
+        // 复制视频结果
+        function copyVideoResult() {
+            const resultTextarea = document.getElementById('videoResult');
+            resultTextarea.select();
+            document.execCommand('copy');
+            
+            // 临时显示复制成功提示
+            const originalText = resultTextarea.placeholder;
+            resultTextarea.placeholder = '已复制到剪贴板！';
+            setTimeout(() => {
+                resultTextarea.placeholder = originalText;
+            }, 2000);
+        }
+
+        // 清空视频结果
+        function clearVideoResult() {
+            document.getElementById('videoResult').value = '';
+            document.getElementById('videoStatus').innerHTML = '<p class="text-muted text-center"><i class="fas fa-info-circle me-2"></i>等待上传视频文件</p>';
+        }
+
+        // 切换批量处理输入类型
+        function toggleBatchInputs() {
+            const processType = document.getElementById('batchProcessType').value;
+            const folderLabel = document.getElementById('folderLabel');
+            const folderInput = document.getElementById('annotationFolderPath');
+            const tagsOption = document.getElementById('tagsOption');
+            const mixedOption = document.getElementById('mixedOption');
+            const videoOption = document.getElementById('videoOption');
+            const annotationType = document.getElementById('annotationType');
+            
+            if (processType === 'videos') {
+                folderLabel.textContent = '视频文件夹路径';
+                folderInput.placeholder = '请输入视频文件夹路径';
+                
+                // 隐藏图片相关选项，显示视频选项
+                tagsOption.style.display = 'none';
+                mixedOption.style.display = 'none';
+                videoOption.style.display = 'block';
+                
+                // 自动选择视频分析模式
+                annotationType.value = 'video';
+            } else {
+                folderLabel.textContent = '图片文件夹路径';
+                folderInput.placeholder = '请输入图片文件夹路径';
+                
+                // 显示图片相关选项，隐藏视频选项
+                tagsOption.style.display = 'block';
+                mixedOption.style.display = 'block';
+                videoOption.style.display = 'none';
+                
+                // 重置为自然语言模式
+                if (annotationType.value === 'video') {
+                    annotationType.value = 'natural';
+                }
+            }
         }
 
         // 初始化时隐藏分析类型（默认显示自然语言推理）
