@@ -312,6 +312,11 @@
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="custom-templates-tab" data-bs-toggle="pill" data-bs-target="#custom-templates" type="button" role="tab">
+                        <i class="fas fa-edit me-2"></i>自定义模板
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
                     <button class="nav-link" id="management-tab" data-bs-toggle="pill" data-bs-target="#management" type="button" role="tab">
                         <i class="fas fa-cogs me-2"></i>标签管理
                     </button>
@@ -346,7 +351,6 @@
                                             <option value="natural">自然语言推理</option>
                                             <option value="tags">标签推理</option>
                                             <option value="mixed">混合标签</option>
-                                            <option value="MP">毛鹏的轻语</option>
                                         </select>
                                     </div>
 
@@ -491,7 +495,6 @@
                                             <option value="natural">自然语言推理</option>
                                             <option value="tags">标签推理</option>
                                             <option value="mixed">混合标签</option>
-                                            <option value="MP">毛鹏的轻语</option>
                                         </select>
                                     </div>
 
@@ -521,6 +524,61 @@
                                     <div class="status-box" id="annotationStatus">
                                         <p class="text-muted text-center">
                                             <i class="fas fa-info-circle me-2"></i>请配置参数后开始标注
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 自定义模板 -->
+                <div class="tab-pane fade" id="custom-templates" role="tabpanel">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="text-center mb-4">
+                                <i class="fas fa-edit feature-icon"></i>
+                                <h3 class="section-title">自定义模板管理</h3>
+                                <p class="text-muted">创建和管理您的专属提示词模板</p>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="option-group">
+                                        <h5><i class="fas fa-plus me-2"></i>创建新模板</h5>
+                                        <div class="mb-3">
+                                            <label class="form-label">模板名称</label>
+                                            <input type="text" class="form-control" id="templateName" placeholder="输入模板名称">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">模板描述</label>
+                                            <input type="text" class="form-control" id="templateDescription" placeholder="输入模板描述（可选）">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">提示词内容</label>
+                                            <textarea class="form-control" id="templatePrompt" rows="8" placeholder="输入您的提示词内容..."></textarea>
+                                        </div>
+                                        <button class="btn btn-primary w-100 mb-3" onclick="saveTemplate()">
+                                            <i class="fas fa-save me-2"></i>保存模板
+                                        </button>
+                                        <button class="btn btn-outline-secondary w-100" onclick="clearTemplateForm()">
+                                            <i class="fas fa-eraser me-2"></i>清空表单
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <div class="option-group">
+                                        <h5><i class="fas fa-list me-2"></i>已有模板</h5>
+                                        <div class="file-list" id="templateList">
+                                            <p class="text-muted text-center">
+                                                <i class="fas fa-info-circle me-2"></i>正在加载模板列表...
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div class="status-box" id="templateStatus">
+                                        <p class="text-muted text-center">
+                                            <i class="fas fa-info-circle me-2"></i>等待操作
                                         </p>
                                     </div>
                                 </div>
@@ -610,6 +668,8 @@
         document.addEventListener('DOMContentLoaded', function() {
             loadAnalysisTypes();
             loadSingleAnalysisTypes();
+            loadCustomTemplates();
+            loadCustomTemplatesIntoSelects();
         });
 
         // 加载分析类型
@@ -1024,6 +1084,199 @@
                 console.error('转换编码失败:', error);
                 document.getElementById('managementStatus').innerHTML = '<p class="text-danger">转换编码失败</p>';
             }
+        }
+
+        // Custom template management functions
+        let currentEditingTemplateId = null;
+
+        // 加载自定义模板列表
+        async function loadCustomTemplates() {
+            try {
+                const response = await fetch('/api/custom_templates');
+                const data = await response.json();
+                
+                const templateList = document.getElementById('templateList');
+                
+                if (data.templates && data.templates.length > 0) {
+                    const templateItems = data.templates.map(template => `
+                        <div class="file-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div class="flex-grow-1">
+                                    <h6><i class="fas fa-file-alt me-2"></i>${template.name}</h6>
+                                    <p class="text-muted small mb-2">${template.description || '无描述'}</p>
+                                    <p class="text-muted small mb-0">${template.prompt.substring(0, 100)}${template.prompt.length > 100 ? '...' : ''}</p>
+                                </div>
+                                <div class="btn-group-vertical btn-group-sm ms-2">
+                                    <button class="btn btn-outline-primary btn-sm" onclick="editTemplate('${template.id}')">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button class="btn btn-outline-danger btn-sm" onclick="deleteTemplate('${template.id}')">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                    templateList.innerHTML = templateItems;
+                } else {
+                    templateList.innerHTML = '<p class="text-muted text-center">暂无自定义模板</p>';
+                }
+            } catch (error) {
+                console.error('加载自定义模板失败:', error);
+                document.getElementById('templateList').innerHTML = '<p class="text-danger">加载模板失败</p>';
+            }
+        }
+
+        // 加载自定义模板到下拉选择框
+        async function loadCustomTemplatesIntoSelects() {
+            try {
+                const response = await fetch('/api/custom_templates');
+                const data = await response.json();
+                
+                const singleSelect = document.getElementById('singleAnnotationType');
+                const batchSelect = document.getElementById('annotationType');
+                
+                // 清除现有的自定义模板选项
+                Array.from(singleSelect.options).forEach(option => {
+                    if (option.value.startsWith('custom_')) {
+                        option.remove();
+                    }
+                });
+                Array.from(batchSelect.options).forEach(option => {
+                    if (option.value.startsWith('custom_')) {
+                        option.remove();
+                    }
+                });
+                
+                // 添加自定义模板选项
+                if (data.templates && data.templates.length > 0) {
+                    data.templates.forEach(template => {
+                        const singleOption = new Option(template.name, `custom_${template.id}`);
+                        const batchOption = new Option(template.name, `custom_${template.id}`);
+                        singleSelect.add(singleOption);
+                        batchSelect.add(batchOption);
+                    });
+                }
+            } catch (error) {
+                console.error('加载自定义模板到选择框失败:', error);
+            }
+        }
+
+        // 保存模板
+        async function saveTemplate() {
+            const name = document.getElementById('templateName').value.trim();
+            const description = document.getElementById('templateDescription').value.trim();
+            const prompt = document.getElementById('templatePrompt').value.trim();
+            
+            if (!name || !prompt) {
+                alert('模板名称和提示词内容不能为空');
+                return;
+            }
+            
+            try {
+                let response;
+                if (currentEditingTemplateId) {
+                    // 更新现有模板
+                    response = await fetch(`/api/custom_templates/${currentEditingTemplateId}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            name: name,
+                            description: description,
+                            prompt: prompt
+                        })
+                    });
+                } else {
+                    // 创建新模板
+                    response = await fetch('/api/custom_templates', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            name: name,
+                            description: description,
+                            prompt: prompt
+                        })
+                    });
+                }
+                
+                const result = await response.json();
+                
+                if (result.success || response.ok) {
+                    document.getElementById('templateStatus').innerHTML = `<p class="text-success"><i class="fas fa-check-circle me-2"></i>${currentEditingTemplateId ? '模板更新成功' : '模板创建成功'}</p>`;
+                    clearTemplateForm();
+                    loadCustomTemplates();
+                    loadCustomTemplatesIntoSelects();
+                } else {
+                    document.getElementById('templateStatus').innerHTML = `<p class="text-danger"><i class="fas fa-exclamation-circle me-2"></i>错误: ${result.error}</p>`;
+                }
+            } catch (error) {
+                console.error('保存模板失败:', error);
+                document.getElementById('templateStatus').innerHTML = '<p class="text-danger">保存模板失败</p>';
+            }
+        }
+
+        // 编辑模板
+        async function editTemplate(templateId) {
+            try {
+                const response = await fetch('/api/custom_templates');
+                const data = await response.json();
+                
+                const template = data.templates.find(t => t.id === templateId);
+                if (template) {
+                    document.getElementById('templateName').value = template.name;
+                    document.getElementById('templateDescription').value = template.description || '';
+                    document.getElementById('templatePrompt').value = template.prompt;
+                    currentEditingTemplateId = templateId;
+                    
+                    // 更新按钮文本
+                    const saveBtn = document.querySelector('button[onclick="saveTemplate()"]');
+                    saveBtn.innerHTML = '<i class="fas fa-save me-2"></i>更新模板';
+                }
+            } catch (error) {
+                console.error('加载模板编辑失败:', error);
+            }
+        }
+
+        // 删除模板
+        async function deleteTemplate(templateId) {
+            if (!confirm('确定要删除这个模板吗？此操作不可撤销。')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/custom_templates/${templateId}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success || response.ok) {
+                    document.getElementById('templateStatus').innerHTML = '<p class="text-success"><i class="fas fa-check-circle me-2"></i>模板删除成功</p>';
+                    loadCustomTemplates();
+                    loadCustomTemplatesIntoSelects();
+                } else {
+                    document.getElementById('templateStatus').innerHTML = `<p class="text-danger"><i class="fas fa-exclamation-circle me-2"></i>错误: ${result.error}</p>`;
+                }
+            } catch (error) {
+                console.error('删除模板失败:', error);
+                document.getElementById('templateStatus').innerHTML = '<p class="text-danger">删除模板失败</p>';
+            }
+        }
+
+        // 清空模板表单
+        function clearTemplateForm() {
+            document.getElementById('templateName').value = '';
+            document.getElementById('templateDescription').value = '';
+            document.getElementById('templatePrompt').value = '';
+            currentEditingTemplateId = null;
+            
+            // 恢复按钮文本
+            const saveBtn = document.querySelector('button[onclick="saveTemplate()"]');
+            saveBtn.innerHTML = '<i class="fas fa-save me-2"></i>保存模板';
         }
 
         // 初始化时隐藏分析类型（默认显示自然语言推理）

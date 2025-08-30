@@ -13,11 +13,21 @@ import random
 import base64
 import torch
 from transformers import AutoTokenizer, AutoProcessor, AutoModelForImageTextToText
+from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+# 全局模型实例（单例模式）
+global_model_instance = None
+
+def get_model_instance():
+    global global_model_instance
+    if global_model_instance is None:
+        global_model_instance = LocalQwenVLTool()
+    return global_model_instance
 
 class LocalQwenVLTool:
     def __init__(self, model_path: str = None):
@@ -38,6 +48,7 @@ class LocalQwenVLTool:
 
         # Load prompts
         self.load_prompts()
+        self.load_user_prompts()
 
         # Load model on GPU (Qwen2.5-VL 推理建议使用 GPU)
         self.load_model()
@@ -53,6 +64,29 @@ class LocalQwenVLTool:
             raise FileNotFoundError("prompts.json 未找到。请在应用根目录提供 prompts.json 以定义所有系统提示词与模式。")
         except Exception as e:
             raise RuntimeError(f"加载 prompts.json 出错: {e}")
+    
+    def load_user_prompts(self):
+        try:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            user_prompts_path = os.path.join(script_dir, 'user-prompts.json')
+            with open(user_prompts_path, 'r', encoding='utf-8') as f:
+                self.user_prompts = json.load(f)
+        except FileNotFoundError:
+            # Create default user prompts file if it doesn't exist
+            self.user_prompts = {"custom_templates": []}
+            self.save_user_prompts()
+        except Exception as e:
+            logger.error(f"加载 user-prompts.json 出错: {e}")
+            self.user_prompts = {"custom_templates": []}
+    
+    def save_user_prompts(self):
+        try:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            user_prompts_path = os.path.join(script_dir, 'user-prompts.json')
+            with open(user_prompts_path, 'w', encoding='utf-8') as f:
+                json.dump(self.user_prompts, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存 user-prompts.json 出错: {e}")
 
     def load_model(self):
         try:
@@ -60,6 +94,8 @@ class LocalQwenVLTool:
                 raise RuntimeError("需要 GPU (CUDA) 才能高效运行 Qwen2.5-VL。本机未检测到可用 GPU。")
 
             logger.info("Loading Qwen2.5-VL-7B-Instruct model (GPU, Transformers)")
+            logger.info(f"GPU信息: {torch.cuda.get_device_name(0)} - 显存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB")
+            
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_path, trust_remote_code=True, use_fast=False
             )
@@ -72,7 +108,13 @@ class LocalQwenVLTool:
                 torch_dtype=torch.float16,
                 trust_remote_code=True
             )
+            
+            # 预热模型
+            self.model.eval()
+            torch.cuda.empty_cache()
+            
             logger.info("Qwen2.5-VL-7B-Instruct loaded successfully on GPU.")
+            logger.info(f"模型设备: {next(self.model.parameters()).device}")
         except Exception as e:
             logger.error(f"模型加载失败: {e}")
             self.model = None
@@ -101,22 +143,54 @@ class LocalQwenVLTool:
             return "错误：本地视觉模型未成功加载（需要 GPU 且模型路径需有效）。"
 
         try:
+            start_time = time.time()
+            
             inputs = self._build_inputs(image_path, prompt_text)
-            inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
+            
+            # 确保所有输入都正确移动到GPU并且数据类型正确
+            inputs = {k: v.to(self.model.device, non_blocking=True) for k, v in inputs.items()}
+            
+            # 检查输入是否有效
+            if 'input_ids' in inputs and inputs['input_ids'].numel() == 0:
+                return "错误：输入处理失败，请检查图片和提示词"
+            
+            prep_time = time.time() - start_time
+            logger.info(f"输入预处理耗时: {prep_time:.2f}s")
+            
+            gen_start = time.time()
             with torch.inference_mode():
+                # 清理显存
+                torch.cuda.empty_cache()
+                
+                # 优化生成参数以提高速度和稳定性
                 output_ids = self.model.generate(
                     **inputs,
                     max_new_tokens=max_tokens,
-                    temperature=0.7,
-                    top_p=0.9,
-                    do_sample=True
+                    temperature=0.7,  # 稍微提高温度增加稳定性
+                    top_p=0.9,       # 提高top_p增加稳定性
+                    do_sample=True,
+                    num_beams=1,     # 使用贪婪搜索
+                    pad_token_id=self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    use_cache=True,  # 启用KV缓存
+                    repetition_penalty=1.1,  # 避免重复
                 )
+            
+            gen_time = time.time() - gen_start
+            logger.info(f"模型生成耗时: {gen_time:.2f}s")
+            
             # 截取新生成部分
             new_tokens = output_ids[:, inputs["input_ids"].shape[1]:]
             text = self.tokenizer.batch_decode(new_tokens, skip_special_tokens=True)[0]
+            
+            total_time = time.time() - start_time
+            logger.info(f"总推理耗时: {total_time:.2f}s")
+            
             return text.strip()
         except Exception as e:
             logger.error(f"推理失败: {e}")
+            # 清理显存
+            torch.cuda.empty_cache()
             return f"错误：模型推理失败 - {str(e)}"
 
     def annotate_image(self, image_path, selected_types, language: str = 'en'):
@@ -184,17 +258,22 @@ class LocalQwenVLTool:
             logger.error(f"annotate_image_mixed 出错: {e}")
             return None
 
-    def annotate_image_mp(self, image_path, language: str = 'en'):
+    def annotate_image_custom(self, image_path, template_id: str):
         try:
-            # MP mode uses modes.mixed.MP.<lang>.system
-            mp_prompt = (
-                self.prompts.get('modes', {}).get('mixed', {}).get('MP', {}).get(language, {}).get('system')
-                or self.prompts.get('modes', {}).get('mixed', {}).get('MP', {}).get('en', {}).get('system')
-                or self.prompts.get('modes', {}).get('mixed', {}).get('MP', {}).get('zh', {}).get('system')
-            )
-            return self.generate_response(image_path, mp_prompt or '', max_tokens=1024)
+            # Find custom template by ID
+            template = None
+            for t in self.user_prompts.get('custom_templates', []):
+                if t.get('id') == template_id:
+                    template = t
+                    break
+            
+            if not template:
+                return f"错误：未找到模板 ID: {template_id}"
+            
+            prompt = template.get('prompt', '')
+            return self.generate_response(image_path, prompt, max_tokens=1024)
         except Exception as e:
-            logger.error(f"annotate_image_mp 出错: {e}")
+            logger.error(f"annotate_image_custom 出错: {e}")
             return None
 
 # 全局变量用于存储处理状态
@@ -249,7 +328,7 @@ def process_images():
                 processing_status[task_id] = {'status': 'error', 'message': '在指定文件夹中没有找到支持的图片文件。'}
                 return
 
-            tool = LocalQwenVLTool()
+            tool = get_model_instance()
             
             for index, image_path in enumerate(image_paths, start=1):
                 progress = int((index / total_images) * 100)
@@ -278,8 +357,9 @@ def process_images():
                         with open(txt_path, 'w', encoding='utf-8') as f:
                             f.write(annotation_text)
                             
-                elif annotation_type == 'MP':
-                    annotation_text = tool.annotate_image_mp(image_path, language)
+                elif annotation_type.startswith('custom_'):
+                    template_id = annotation_type.replace('custom_', '')
+                    annotation_text = tool.annotate_image_custom(image_path, template_id)
                     if annotation_text:
                         txt_path = source_path / f"{image_path.stem}.txt"
                         with open(txt_path, 'w', encoding='utf-8') as f:
@@ -503,7 +583,7 @@ def process_single_image():
         
         try:
             # 初始化工具（本地视觉模型）
-            tool = LocalQwenVLTool()
+            tool = get_model_instance()
             
             # 根据标注类型处理
             if annotation_type == 'natural':
@@ -519,9 +599,11 @@ def process_single_image():
                 annotation_text = tool.annotate_image_mixed(temp_path, language)
                 result_text = annotation_text if annotation_text else "标注失败，请重试"
                 
-            elif annotation_type == 'MP':
-                annotation_text = tool.annotate_image_mp(temp_path, language)
+            elif annotation_type.startswith('custom_'):
+                template_id = annotation_type.replace('custom_', '')
+                annotation_text = tool.annotate_image_custom(temp_path, template_id)
                 result_text = annotation_text if annotation_text else "标注失败，请重试"
+            
             
             else:
                 result_text = "不支持的标注类型"
@@ -545,6 +627,100 @@ def process_single_image():
     except Exception as e:
         logger.error(f"单张图片接口错误: {str(e)}")
         return jsonify({'success': False, 'error': f'接口错误: {str(e)}'})
+
+# Custom template management endpoints
+@app.route('/api/custom_templates', methods=['GET'])
+def get_custom_templates():
+    try:
+        tool = get_model_instance()
+        return jsonify({'templates': tool.user_prompts.get('custom_templates', [])})
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+@app.route('/api/custom_templates', methods=['POST'])
+def create_custom_template():
+    try:
+        data = request.json
+        name = data.get('name', '').strip()
+        description = data.get('description', '').strip()
+        prompt = data.get('prompt', '').strip()
+        
+        if not name or not prompt:
+            return jsonify({'error': '模板名称和提示词不能为空'})
+        
+        tool = get_model_instance()
+        
+        # Generate unique ID
+        template_id = str(uuid.uuid4())
+        
+        # Create new template
+        new_template = {
+            'id': template_id,
+            'name': name,
+            'description': description,
+            'prompt': prompt,
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat()
+        }
+        
+        tool.user_prompts['custom_templates'].append(new_template)
+        tool.save_user_prompts()
+        
+        return jsonify({'success': True, 'template': new_template})
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+@app.route('/api/custom_templates/<template_id>', methods=['PUT'])
+def update_custom_template(template_id):
+    try:
+        data = request.json
+        name = data.get('name', '').strip()
+        description = data.get('description', '').strip()
+        prompt = data.get('prompt', '').strip()
+        
+        if not name or not prompt:
+            return jsonify({'error': '模板名称和提示词不能为空'})
+        
+        tool = get_model_instance()
+        
+        # Find and update template
+        template_found = False
+        for template in tool.user_prompts['custom_templates']:
+            if template['id'] == template_id:
+                template['name'] = name
+                template['description'] = description
+                template['prompt'] = prompt
+                template['updated_at'] = datetime.now().isoformat()
+                template_found = True
+                break
+        
+        if not template_found:
+            return jsonify({'error': '模板未找到'})
+        
+        tool.save_user_prompts()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+@app.route('/api/custom_templates/<template_id>', methods=['DELETE'])
+def delete_custom_template(template_id):
+    try:
+        tool = get_model_instance()
+        
+        # Find and remove template
+        original_count = len(tool.user_prompts['custom_templates'])
+        tool.user_prompts['custom_templates'] = [
+            t for t in tool.user_prompts['custom_templates'] 
+            if t['id'] != template_id
+        ]
+        
+        if len(tool.user_prompts['custom_templates']) == original_count:
+            return jsonify({'error': '模板未找到'})
+        
+        tool.save_user_prompts()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)})
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5005)
