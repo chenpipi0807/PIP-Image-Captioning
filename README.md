@@ -160,5 +160,5 @@ python app.py
 - 批量处理时会自动覆盖同名的标注文件
 - 支持的图片格式：JPG、JPEG、PNG、WebP、BMP、GIF、TIFF、JFIF、HEIC、HEIF、AVIF
 
-## 许可证
-本项目遵循相应的开源许可证，具体请查看 LICENSE 文件。
+## 免责声明
+本项目遵循相应的开源许可证，请在遵守公序良俗与社会基础道德的基础上使用。
