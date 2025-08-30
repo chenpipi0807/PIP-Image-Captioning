@@ -17,6 +17,9 @@
 <img width="1926" height="1743" alt="a806fd34da082d1bd6fc4e50dc6bca67" src="https://github.com/user-attachments/assets/7be57bf4-9b56-40e7-a427-5b2d09268c18" />
 <img width="1803" height="1770" alt="a0e4618aba0c1c3a3cc20db9a41fb3ed" src="https://github.com/user-attachments/assets/b4ecbe67-af80-440f-9b50-8a4057ecfb7a" />
 
+- **0830**：增加了视频标注与视频标注批处理
+<img width="1776" height="1860" alt="4a2940261877fdbf0cd2b587cfd26cb6" src="https://github.com/user-attachments/assets/4aaff258-5a0f-495d-a562-3700f2082d0c" />
+<img width="1791" height="483" alt="9ffae193b19d37ce26f6cf924497cdc2" src="https://github.com/user-attachments/assets/f3072590-cdd7-410e-9be4-a6cbbfd8abdf" />
 
 
 ## 功能特性
