@@ -155,7 +155,7 @@ python app.py
 - **加速**：Accelerate + GPU 优化
 
 ## 注意事项
-- 首次启动需要加载 7B 模型，耗时约 20-30 秒
+- 首次启动需要加载 7B 模型，耗时约 20-30 秒，平均图像推理耗时5s（longsize=1024）
 - 建议使用 GPU 进行推理，CPU 模式较慢
 - 批量处理时会自动覆盖同名的标注文件
 - 支持的图片格式：JPG、JPEG、PNG、WebP、BMP、GIF、TIFF、JFIF、HEIC、HEIF、AVIF
