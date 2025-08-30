@@ -102,11 +102,14 @@ class LocalQwenVLTool:
             self.processor = AutoProcessor.from_pretrained(
                 self.model_path, trust_remote_code=True
             )
+            # 使用其他优化选项替代Flash Attention
             self.model = AutoModelForImageTextToText.from_pretrained(
                 self.model_path,
                 device_map="auto",
-                torch_dtype=torch.float16,
-                trust_remote_code=True
+                torch_dtype=torch.bfloat16,  # 使用bfloat16可能更快
+                trust_remote_code=True,
+                low_cpu_mem_usage=True,  # 减少CPU内存使用
+                use_cache=True  # 启用KV缓存
             )
             
             # 预热模型
@@ -162,18 +165,15 @@ class LocalQwenVLTool:
                 # 清理显存
                 torch.cuda.empty_cache()
                 
-                # 优化生成参数以提高速度和稳定性
+                # 使用更优化的生成参数
                 output_ids = self.model.generate(
                     **inputs,
                     max_new_tokens=max_tokens,
-                    temperature=0.7,  # 稍微提高温度增加稳定性
-                    top_p=0.9,       # 提高top_p增加稳定性
+                    temperature=0.7,
+                    top_p=0.9,
                     do_sample=True,
-                    num_beams=1,     # 使用贪婪搜索
-                    pad_token_id=self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                    use_cache=True,  # 启用KV缓存
-                    repetition_penalty=1.1,  # 避免重复
+                    use_cache=True,  # 启用KV缓存加速
+                    pad_token_id=self.tokenizer.eos_token_id
                 )
             
             gen_time = time.time() - gen_start
