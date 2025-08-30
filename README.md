@@ -10,7 +10,7 @@
 
 ## 更新日志
 
-- **0830**：增加了对于自定义PE模板的支持
+- **0830**：增加了对于自定义PE模板的支持；增加了对于推理性能的优化
 
 <img width="1926" height="1743" alt="a806fd34da082d1bd6fc4e50dc6bca67" src="https://github.com/user-attachments/assets/7be57bf4-9b56-40e7-a427-5b2d09268c18" />
 <img width="1803" height="1770" alt="a0e4618aba0c1c3a3cc20db9a41fb3ed" src="https://github.com/user-attachments/assets/b4ecbe67-af80-440f-9b50-8a4057ecfb7a" />
