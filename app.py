@@ -682,8 +682,13 @@ def manage_tags():
                     with open(txt_file, 'r', encoding='utf-8') as f:
                         content = f.read()
                     
+                    # 额外功能：移除所有换行符（\r\n、\n、\r）
+                    content_no_newlines = (
+                        content.replace('\r\n', '').replace('\n', '').replace('\r', '')
+                    )
+                    
                     with open(txt_file, 'w', encoding='utf-8') as f:
-                        f.write(content)
+                        f.write(content_no_newlines)
                     
                     converted_files.append(txt_file.name)
                 except Exception as e:
