@@ -464,6 +464,15 @@ def process_images():
     task_id = str(uuid.uuid4())
     processing_status[task_id] = {'status': 'processing', 'progress': 0, 'messages': []}
     
+    # 预先在主线程加载模型，避免在后台线程中首次初始化CUDA/模型导致失败
+    try:
+        tool = get_model_instance()
+        if not tool.is_loaded():
+            tool.load_model()
+    except Exception as e:
+        processing_status[task_id] = {'status': 'error', 'message': f'模型初始化失败: {e}'}
+        return jsonify({'task_id': task_id})
+    
     def process_task():
         try:
             source_path = Path(folder_path)
@@ -958,6 +967,18 @@ def process_videos():
             'messages': []
         }
         
+        # 预先在主线程加载模型，避免在后台线程中首次初始化CUDA/模型导致失败
+        try:
+            tool = get_model_instance()
+            if not tool.is_loaded():
+                tool.load_model()
+        except Exception as e:
+            processing_status[task_id] = {
+                'status': 'error',
+                'message': f'模型初始化失败: {e}'
+            }
+            return jsonify({'task_id': task_id})
+        
         # 在后台线程中处理视频
         thread = threading.Thread(target=batch_process_videos, args=(task_id, folder_path, language))
         thread.daemon = True
@@ -1034,4 +1055,5 @@ def batch_process_videos(task_id, folder_path, language):
         }
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5005)
+    # 关闭debug与reloader，避免重复加载导致模型初始化两次
+    app.run(debug=False, use_reloader=False, host='0.0.0.0', port=5005)
